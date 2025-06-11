@@ -1,7 +1,0 @@
-"Par","contrast","estimate","SE","df","z.ratio","p.value"
-"RepeatabilityEstimates","Model_1 - Model_2","-0.103","0.004","Inf","-29.233","< .001"
-"RepeatabilityEstimates","Model_1 - Model_3","-0.627","0.005","Inf","-116.583","< .001"
-"RepeatabilityEstimates","Model_1 - Model_4","-0.488","0.006","Inf","-87.472","< .001"
-"RepeatabilityEstimates","Model_2 - Model_3","-0.524","0.006","Inf","-82.911","< .001"
-"RepeatabilityEstimates","Model_2 - Model_4","-0.385","0.006","Inf","-59.334","< .001"
-"RepeatabilityEstimates","Model_3 - Model_4","0.139","0.008","Inf","18.152","< .001"
