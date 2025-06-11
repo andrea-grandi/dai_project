@@ -9,11 +9,16 @@ globals [
   show-debug-info?
   ; Add initial-storers to control number of storer bees
   initial-storers       ; Number of initial storer bees (for slider)
+  ;initial-nurses
   ; You may also want to add these other commented variables
   ;initial-unemployed    ; Number of initial unemployed bees (for slider)
   ;initial-foragers      ; Number of initial forager bees (for slider)
   ;initial-larvae        ; Number of initial larvae (for slider)
   ;brood-area-radius     ; Radius of the brood area (for slider)
+  perturbation-active?     ; Flag to track if perturbation is happening
+  perturbation-amount      ; Amount of nectar to remove (0.0 to 1.0)
+  perturbation-frequency   ; How often to apply perturbation (in ticks)
+  last-perturbation-tick
 ]
 
 breed [ foragers forager ]
@@ -56,7 +61,8 @@ to setup
   ; Set default values if sliders don't exist
   if initial-storers = 0 [ set initial-storers 15 ]      ; Default: 15 storers
   if initial-unemployed = 0 [ set initial-unemployed 10 ] ; Default: 10 unemployed
-  if initial-foragers = 0 [ set initial-foragers 5 ]     ; Default: 5 foragers
+  if initial-foragers = 0 [ set initial-foragers 15 ]     ; Default: 5 foragers
+  if initial-nurses = 0 [ set initial-nurses 100 ]
   if initial-larvae = 0 [ set initial-larvae 8 ]         ; Default: 8 larvae
   if brood-area-radius = 0 [ set brood-area-radius 5 ]   ; Default: radius 5
 
@@ -67,6 +73,10 @@ to setup
   setup-larvae
   reset-ticks
   set total-nectar 0
+  set perturbation-active? false
+  set perturbation-amount 0.3        ; Remove 30% of nectar by default
+  set perturbation-frequency 500     ; Every 500 ticks by default
+  set last-perturbation-tick 0
 end
 
 to setup-hive
@@ -135,7 +145,7 @@ to setup-patches
     ;; Initialize all patches first
     set is-brood-cell? false
     set is-storage-cell? false
-    set nectar-stored 1
+    set nectar-stored 0.3
     set nursing-stimulus 0    ; Initialize stimuli values
     set foraging-stimulus 0
     set storing-stimulus 0
@@ -175,7 +185,7 @@ to setup-bees
     set theta-foraging 0.5
     set theta-storing 0.5
     set theta-nursing 0.5
-    set nectar-load random-float 1
+    set nectar-load random-float 0.3
 
     move-to one-of patches with [
       pxcor >= hive-left and pxcor <= hive-right and
@@ -191,7 +201,21 @@ to setup-bees
     set task-state "foraging"
     set activity-state "start"
     set theta-foraging 0.1
-    set nectar-load 0.9
+    set nectar-load 0.3
+    move-to one-of patches with [
+      pxcor >= hive-left and pxcor <= hive-right and
+      pycor >= hive-bottom and pycor <= hive-top
+    ]
+  ]
+
+  create-nurses initial-nurses [
+    set shape "bee"
+    set color yellow
+    set size 0.8
+    set task-state "nursing"
+    set activity-state "start"
+    set theta-nursing 0.1
+    set nectar-load 0.3
     move-to one-of patches with [
       pxcor >= hive-left and pxcor <= hive-right and
       pycor >= hive-bottom and pycor <= hive-top
@@ -208,7 +232,7 @@ to setup-bees
     set theta-storing 0.1     ; Low threshold - they're dedicated storers
     set theta-foraging 0.7    ; High threshold - less likely to switch to foraging
     set theta-nursing 0.6     ; Medium threshold for nursing
-    set nectar-load 0.5       ; Start with some nectar
+    set nectar-load 0.3       ; Start with some nectar
 
     ; Position them near the storage area
     move-to one-of patches with [
@@ -329,6 +353,7 @@ to update-stimuli
   ;; Larval hunger signals
   ask larvae [
     ;print nectar-load
+    consume-nectar
     if nectar-load < 0.25 [ ; hunger threshold
       let my-load nectar-load  ;; Store the nectar load in a local variable
       ask patch-here [
@@ -536,32 +561,37 @@ to handle-storing  ; storer procedure
   ]
 
   if activity-state = "start" [
+    ;let target-x random-float (hive-right - hive-left - 2) + hive-left + 1
+    ;let target-y hive-bottom
+    ;setxy target-x target-y
     set activity-state "wait-for-nectar"
-    let target-x random-float (hive-right - hive-left - 2) + hive-left + 1
-    let target-y hive-bottom + 1
-    setxy target-x target-y
   ]
 
   if activity-state = "wait-for-nectar" [
     ; Wait for foragers with nectar
-    if ycor > (hive-bottom + 3) [
-      facexy pxcor (hive-bottom + 1)  ; Stay toward the bottom
+    if ycor > (hive-bottom + 1) [
+      facexy pxcor (hive-bottom)  ; Stay toward the bottom
       fd 0.2
     ]
     ; Small random movement while waiting
     rt random 30 - 15
     fd 0.1
-    set activity-state "receive-nectar"
+    ;print(storing-stimulus)
+    if storing-stimulus > 0.5 [
+     set activity-state "receive-nectar"
+    ]
+    ;set activity-state "receive-nectar"
   ]
 
   if activity-state = "receive-nectar" [
     ; Get nectar from forager
-    set nectar-load nectar-load + 0.9  ; Get 0.9 from forager
+    set nectar-load nectar-load + 0.5  ; Get 0.5 from forager
     set activity-state "find-storage"
   ]
 
   if activity-state = "find-storage" [
     ; Only look for storage if we have more than the minimum reserve (0.5)
+    ;print(nectar-load)
     ifelse nectar-load > 0.5 [
       ; Find storage cell
       let target-cell min-one-of (patches with [is-storage-cell? and nectar-stored < 1.0]) [distance myself]
@@ -597,7 +627,7 @@ to handle-storing  ; storer procedure
         set nectar-stored nectar-stored + amount-to-store
         update-cell-color  ; Update the cell color based on new nectar level
       ]
-
+      ;print(amount-to-store)
       ; Update bee's nectar load, maintaining the 0.5 minimum
       set nectar-load nectar-load - amount-to-store
 
@@ -829,6 +859,80 @@ to switch-to-task [new-task]
   set size 0.8
 end
 
+; Perturbations
+to remove-nectar-from-storage
+  let total-removed 0
+
+  ask patches with [is-storage-cell? and nectar-stored > 0] [
+    let amount-to-remove nectar-stored * perturbation-amount
+    set nectar-stored nectar-stored - amount-to-remove
+    set total-removed total-removed + amount-to-remove
+
+    ; Make sure nectar doesn't go negative
+    if nectar-stored < 0 [
+      set nectar-stored 0
+    ]
+
+    ; Update the cell color to reflect new nectar level
+    update-cell-color
+  ]
+
+  ; Update total nectar count
+  set total-nectar total-nectar - total-removed
+
+  ; Visual feedback - briefly flash the storage area
+  ask patches with [is-storage-cell?] [
+    set pcolor white
+  ]
+
+  ; Restore colors after brief flash
+  wait 0.1
+  ask patches with [is-storage-cell?] [
+    update-cell-color
+  ]
+
+  ;print (word "Removed " precision total-removed 2 " units of nectar from storage")
+end
+
+to apply-automatic-perturbation
+  if perturbation-active? and (ticks - last-perturbation-tick) >= perturbation-frequency [
+    remove-nectar-from-storage
+    set last-perturbation-tick ticks
+  ]
+end
+
+to remove-50-percent-nectar
+  let total-removed 0
+
+  ; Go through all storage cells and remove 50% of their nectar
+  ask patches with [is-storage-cell? and nectar-stored > 0] [
+    let amount-to-remove nectar-stored * 1  ; Remove 50% of nectar
+    set total-removed total-removed + amount-to-remove
+    set nectar-stored nectar-stored - amount-to-remove
+
+    ; Update the cell color to reflect new nectar level
+    update-cell-color
+  ]
+
+  ; Update total nectar count
+  set total-nectar total-nectar - total-removed
+
+  ; Visual feedback - briefly flash the storage area white
+  ask patches with [is-storage-cell?] [
+    set pcolor white
+  ]
+
+  ; Wait briefly then restore colors
+  wait 0.1
+  ask patches with [is-storage-cell?] [
+    update-cell-color
+  ]
+
+  ; Print confirmation message
+  print (word "Removed 50% of nectar from storage (" precision total-removed 2 " units)")
+end
+
+
 ;;; UTILITIES ;;;
 to check-refill  ; turtle procedure
   ; Only try to refill if nectar is low and we're not currently foraging
@@ -883,12 +987,10 @@ end
 
 to consume-nectar
   ifelse activity-state = "fly-out" or activity-state = "fly-home" [
-    set nectar-load nectar-load - 0.0004  ; High metabolic rate when flying
+    set nectar-load nectar-load - 0.001  ; High metabolic rate when flying
   ][
-    set nectar-load nectar-load - 0.001  ; Lower metabolic rate when in hive
+    set nectar-load nectar-load - 0.0004  ; Lower metabolic rate when in hive
   ]
-
-  set nectar-load nectar-load - 0.0004
 
   if nectar-load <= 0 [
       die
@@ -951,8 +1053,8 @@ end
 GRAPHICS-WINDOW
 384
 48
-1202
-867
+1102
+767
 -1
 -1
 10.0
@@ -965,10 +1067,10 @@ GRAPHICS-WINDOW
 0
 0
 1
--40
-40
--40
-40
+-35
+35
+-35
+35
 0
 0
 1
@@ -1031,7 +1133,7 @@ SLIDER
 159
 initial-unemployed
 initial-unemployed
-500
+50
 800
 685.0
 1
@@ -1048,7 +1150,7 @@ initial-foragers
 initial-foragers
 0
 50
-15.0
+30.0
 1
 1
 NIL
@@ -1062,7 +1164,7 @@ SLIDER
 initial-larvae
 initial-larvae
 0
-100
+200
 100.0
 1
 1
@@ -1070,10 +1172,10 @@ NIL
 HORIZONTAL
 
 PLOT
-28
-266
-348
-570
+1126
+50
+1446
+354
 Bee Population 
 time
 bees
@@ -1092,10 +1194,10 @@ PENS
 "Unemployed" 1.0 0 -9276814 true "" "plot count unemployeds"
 
 PLOT
-38
-613
-238
-763
+1127
+360
+1448
+655
 Nectar Load
 time
 load 
@@ -1108,6 +1210,38 @@ false
 "" ""
 PENS
 "Nectar Load" 1.0 0 -16777216 true "" "plot sum [nectar-stored] of patches with [is-storage-cell?]"
+
+SLIDER
+33
+265
+205
+298
+initial-nurses
+initial-nurses
+0
+100
+80.0
+1
+1
+NIL
+HORIZONTAL
+
+BUTTON
+31
+311
+232
+344
+remove-nectar
+remove-50-percent-nectar
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
 
 @#$#@#$#@
 ## WHAT IS IT?
